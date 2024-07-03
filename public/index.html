@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>YouTube Data API Example</title>
+    <script src="https://apis.google.com/js/api.js"></script>
+    <script src="https://www.youtube.com/iframe_api"></script>
+    <script src="https://apis.google.com/js/platform.js" async defer></script>
+  </head>
+  <body>
+    <button onclick="authenticate().then(loadClient)">
+      Authorize and Load
+    </button>
+    <button onclick="execute()">Roll and Play</button>
+    <div id="player"></div>
+    <ul id="playlist"></ul>
+    <script>
+      let videoIds = []; // Stores all video ids
+      let player;
+      let currentVideoIndex = 0;
+      let isFetching = false;
+      let isFetched = false;
+
+      function authenticate() {
+        return gapi.auth2
+          .getAuthInstance()
+          .signIn({
+            scope:
+              "https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/youtube.force-ssl https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtubepartner",
+          })
+          .then(
+            function () {
+              console.log("Sign-in successful");
+            },
+            function (err) {
+              console.error("Error signing in", err);
+            }
+          );
+      }
+
+      function loadClient() {
+        gapi.client.setApiKey(process.env.PUBLIC_YOUTUBE_API_KEY); //api key
+        return gapi.client
+          .load("https://youtube.googleapis.com/$discovery/rest?version=v3")
+          .then(
+            function () {
+              console.log("GAPI client loaded for API");
+            },
+            function (err) {
+              console.error("Error loading GAPI client for API", err);
+            }
+          );
+      }
+
+      // Make sure the client is loaded and sign-in is complete before calling this method.
+      function execute() {
+        if (!isFetched && !isFetching) {
+          isFetching = true;
+          fetchAllVideoIds()
+            .then(() => {
+              isFetched = true;
+              isFetching = false;
+              startShuffle();
+            })
+            .catch((err) => {
+              console.error("error during fetching and shuffling", err);
+            });
+        } else {
+          console.log("fetching is in progress or already done");
+          alert("Fetching videos in progress or completed");
+        }
+      }
+
+      function fetchAllVideoIds(pageToken = "") {
+        return gapi.client.youtube.playlistItems
+          .list({
+            part: "snippet",
+            playlistId: "PLLhUn-idcYtxgo-3efTosjgcteKGKSrBP",
+            maxResults: 50,
+            fields: "nextPageToken, items(snippet(resourceId/videoId, title))",
+            pageToken: pageToken,
+          })
+          .then((response) => {
+            response.result.items.forEach((item) => {
+              if (
+                item.snippet.title !== "Deleted video" &&
+                item.snippet.title !== "Private video"
+              ) {
+                videoIds.push({
+                  id: item.snippet.resourceId.videoId,
+                  title: item.snippet.title,
+                });
+              }
+            });
+            console.log("Video IDs and titles fetched this batch:", videoIds);
+            if (response.result.nextPageToken) {
+              return fetchAllVideoIds(response.result.nextPageToken);
+            } else {
+              console.log("All video IDs fetched", videoIds);
+            }
+          })
+          .catch((err) => {
+            console.error("Execute error", err);
+            return Promise.reject(err);
+          });
+      }
+
+      function updatePlaylistDisplay(video, index) {
+        const listContainer = document.getElementById("playlist");
+        const listItem = document.createElement("li");
+        listItem.textContent = `${index + 1}: ${video.title}`;
+        listContainer.appendChild(listItem);
+      }
+
+      function onYouTubeIframeAPIReady() {
+        if (videoIds.length > 0 && !player) {
+          initializePlayer(videoIds[currentVideoIndex].id);
+        }
+      }
+
+      function initializePlayer(videoId) {
+        player = new YT.Player("player", {
+          height: "360",
+          width: "640",
+          videoId: videoId,
+          events: {
+            onReady: onPlayerReady,
+            onStateChange: onPlayerStateChange,
+          },
+        });
+      }
+
+      function onPlayerReady(event) {
+        event.target.playVideo();
+      }
+
+      function onPlayerStateChange(event) {
+        if (event.data === YT.PlayerState.ENDED) {
+          loadNextVideo();
+        }
+      }
+
+      function loadNextVideo() {
+        if (currentVideoIndex >= videoIds.length) {
+          shuffleArray(videoIds);
+          currentVideoIndex = 0; // Reset the index after reshuffling
+        }
+        const currentVideo = videoIds[currentVideoIndex];
+        if (player) {
+          player.loadVideoById(currentVideo.id); // Load the next video and increment index
+          updatePlaylistDisplay(currentVideo, currentVideoIndex);
+          highlightCurrentVideo(currentVideoIndex);
+          currentVideoIndex++;
+        } else {
+          console.error("player not initialized");
+        }
+      }
+
+      function highlightCurrentVideo(index) {
+        const listItems = document.querySelectorAll("#playlist li");
+        listItems.forEach((item, idx) => {
+          if (idx === index) {
+            item.style.color = "red"; //highlight current song
+          } else {
+            item.style.color = "black";
+          }
+        });
+      }
+
+      function shuffleArray(array) {
+        for (let i = array.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1)); // Random index from 0 to i
+          [array[i], array[j]] = [array[j], array[i]]; // Swap elements
+        }
+      }
+
+      function startShuffle() {
+        if (isFetched && videoIds.length > 0) {
+          shuffleArray(videoIds);
+          console.log("shuffled videoIds:", videoIds);
+          if (!player) {
+            initializePlayer(videoIds[0].id);
+            updatePlaylistDisplay(
+              videoIds[currentVideoIndex],
+              currentVideoIndex
+            );
+            currentVideoIndex++;
+          } else {
+            loadNextVideo();
+          }
+        } else {
+          console.log("no video ids avaialbe to shuffle.");
+        }
+      }
+
+      gapi.load("client:auth2", function () {
+        gapi.auth2.init({
+          client_id: process.env.PUBLIC_GOOGLE_CLIENT_ID,
+        });
+      });
+    </script>
+  </body>
+</html>
